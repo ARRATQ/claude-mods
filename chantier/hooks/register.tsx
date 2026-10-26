@@ -51,7 +51,7 @@ export function namesId(heading: string, id: string): boolean {
   return new RegExp(`(?:^|[^0-9A-Za-z])${esc}(?![0-9A-Za-z])`, 'i').test(heading)
 }
 
-// Ids des tâches du plan, dans l'ordre : « ### Task 7b : … » et « ### Task B1 `[USER]` : … »
+// Ids des tâches du plan, dans l'ordre : « ### Task 7b : … », « ### Tâche 3 : … » et « ### Task B1 `[USER]` : … »
 // ⇒ « 7b », « B1 ». Avec un id
 // d'élément, seulement les tâches des sections « ## » qui le nomment, s'il y en a.
 export function planTasks(plan: string, id?: string): string[] {
@@ -63,7 +63,7 @@ export function planTasks(plan: string, id?: string): string[] {
     if (line.startsWith('```')) inFence = !inFence
     if (inFence) continue
     if (/^##\s/.test(line)) inMine = !!id && namesId(line, id)
-    const m = /^###\s+Task\s+([0-9A-Za-z]+)(?:\s+`[^`]*`)*\s*:/.exec(line)
+    const m = /^###\s+(?:Task|Tâche)\s+([0-9A-Za-z]+)(?:\s+`[^`]*`)*\s*:/.exec(line)
     const t = m ? m[1] : undefined
     if (!t) continue
     if (!all.includes(t)) all.push(t)
@@ -531,6 +531,43 @@ export function sentence(r: Pick<Report, 'title' | 'progress' | 'merged' | 'tota
   return `${r.title} : ${pct(r.progress)} — ${r.merged}/${r.total} PR mergées.${now}${held}`
 }
 
+// Élément à reprendre : celui en cours ou en PR ouverte, sinon le premier à venir.
+export function resumeTarget(prs: PrRow[]): PrRow | undefined {
+  return prs.find(pr => pr.status === 'in_progress' || pr.status === 'open') ?? prs.find(pr => pr.status === 'planned')
+}
+
+// Consigne de /reprendre, envoyée comme un message de la personne : l'état du
+// chantier, ce qu'il faut relire, puis reprendre le travail sans autre consigne.
+export function resumePrompt(
+  r: Pick<Report, 'title' | 'objective' | 'progress' | 'merged' | 'total' | 'prs' | 'inFlight' | 'onHold' | 'lastNote'>,
+  sources: string[],
+): string {
+  const pr = resumeTarget(r.prs)
+  const detail = pr
+    ? [
+        LABEL[pr.status],
+        pr.tasksTotal ? `${pr.tasksDone}/${pr.tasksTotal} tâches` : '',
+        pr.nextTask ? `prochaine tâche ${pr.nextTask}` : '',
+        pr.lastStep ? `dernier pas noté : ${pr.lastStep}` : '',
+      ]
+        .filter(Boolean)
+        .join(' ; ')
+    : ''
+  return [
+    `Reprends le chantier « ${r.title} » là où il s'est arrêté.`,
+    `Objectif : ${r.objective}`,
+    `État : ${sentence(r)}`,
+    pr
+      ? `Élément à reprendre : ${pr.id} — ${pr.title} (${detail}).`
+      : 'Tous les éléments sont fusionnés : vérifie qu’il ne reste rien à faire (documentation, feuille de route) et dis-le.',
+    r.lastNote ? `Dernière note : ${r.lastNote}` : '',
+    `Relis d'abord : ${sources.join(', ')} ; puis le plan et le registre SDD de l'élément, l'état git de sa branche (status, log) et la feuille de route du projet.`,
+    'Détermine toi-même la prochaine action concrète, annonce-la en une phrase simple, puis enchaîne en suivant la méthodologie du projet (CLAUDE.md). Ne t’arrête que pour une question métier ou une validation qui revient à l’utilisatrice.',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 const hhmm = (t: number) => new Date(t).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
 const pct = (r: number) => `${Math.round(r * 100)} %`
 const bar = (r: number, w = 24) => '█'.repeat(Math.round(r * w)) + '░'.repeat(w - Math.round(r * w))
@@ -601,6 +638,11 @@ export const register: Register = on => {
       name: 'chantier',
       description: 'Chantier de la session : objectif, avancement et PR (/chantier [nom|liste])',
     })
+    await $.command.register({
+      name: 'reprendre',
+      description: 'Reprend le travail du chantier là où il s’est arrêté (/reprendre [nom])',
+      argumentHint: '[nom]',
+    })
     await $.state.set(BUSY, false)
     $.clock.every(EVERY, () => void quietRefresh($))
     // Un dépôt illisible au démarrage ne doit pas priver la session du panneau.
@@ -651,6 +693,31 @@ export const register: Register = on => {
     if (!r) return { text: `Chantier « ${slug} » introuvable.` }
     await $.ui.open({ id: PANE, title: 'Chantier' })
     return { text: sentence(r) }
+  })
+
+  // Chantier choisi : l'argument, sinon celui suivi par la session, sinon celui
+  // de la branche courante, sinon le seul connu.
+  on('command.run', { command: 'reprendre' }, async ($, e) => {
+    const { root, known } = await listKnown($)
+    knownCache = known
+    if (known.length === 0) return { text: 'Aucun chantier trouvé (ni .superpowers/chantiers/*.json, ni mémoire chantier-*.md).' }
+    const arg = e.args.trim()
+    const { value: current } = await $.state.get(CURRENT)
+    const out = await $.process.run(['git', 'branch', '--show-current'], { cwd: root }).catch(() => undefined)
+    const branch = out && out.exitCode === 0 ? String(out.stdout).trim() : ''
+    const slug = arg
+      ? detect(arg, known) ?? known.find(k => k.slug === arg)?.slug
+      : current ?? (branch ? detect(branch, known) : undefined) ?? (known.length === 1 ? known[0]?.slug : undefined)
+    if (!slug) return { text: `Quel chantier reprendre ? ${known.map(k => `/reprendre ${k.slug}`).join(', ')}.` }
+    const r = await refresh($, slug)
+    const k = known.find(c => c.slug === slug)
+    if (!r || !k) return { text: `Chantier « ${slug} » introuvable.` }
+    const sources = [k.manifest, k.memory].filter((p): p is string => !!p).map(p => p.replace(`${root}/`, ''))
+    // Envoyée depuis la commande, la consigne attendrait le tour que la commande
+    // tient : un minuteur la soumet juste après, comme un message de la personne.
+    const text = resumePrompt(r, sources)
+    $.clock.after(1, () => void $.prompt.submit({ text, asUser: true }).catch(() => $.ui.toast('La reprise n’a pas pu être lancée : /reprendre à nouveau.')))
+    return { text: `Reprise — ${sentence(r)}` }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {

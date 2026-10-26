@@ -19,6 +19,8 @@ import {
   worktreePaths,
   manifestStatus,
   planTasks,
+  resumePrompt,
+  resumeTarget,
   prNumbers,
   resolveState,
   sentence,
@@ -202,3 +204,31 @@ describe('pause et PR découpées', () => {
   })
 })
 
+
+describe('reprise', () => {
+  test('les tâches d’un plan en français comptent', async () => {
+    expect(planTasks('### Tâche 1 : modèle\n### Tâche 2 : proposer\n### Task 3 : écrans')).toEqual(['1', '2', '3'])
+  })
+
+  test('l’élément repris est celui en cours, sinon le premier à venir', async () => {
+    const merged = { id: 'lot2', title: 'Jira', objective: '', status: 'merged' as const, progress: 1 }
+    const planned = { id: 'lot4', title: 'Suite', objective: '', status: 'planned' as const, progress: 0 }
+    const live = { id: 'lot3', title: 'Classement', objective: '', status: 'in_progress' as const, progress: 0.2, tasksDone: 2, tasksTotal: 8, nextTask: '3' }
+    expect(resumeTarget([merged, planned, live])?.id).toBe('lot3')
+    expect(resumeTarget([merged, planned])?.id).toBe('lot4')
+    expect(resumeTarget([merged])).toBeUndefined()
+  })
+
+  test('la consigne donne l’état, l’élément, les sources et demande d’enchaîner', async () => {
+    const live = { id: 'lot3', title: 'Classement', objective: '', status: 'in_progress' as const, progress: 0.2, tasksDone: 2, tasksTotal: 8, nextTask: '3' }
+    const text = resumePrompt(
+      { title: 'Socle', objective: 'Analyses fiables', progress: 0.8, merged: 3, total: 4, prs: [live], inFlight: inFlight([live]) },
+      ['.superpowers/chantiers/socle.json'],
+    )
+    expect(text).toContain('Reprends le chantier « Socle »')
+    expect(text).toContain('Élément à reprendre : lot3 — Classement (en cours ; 2/8 tâches ; prochaine tâche 3)')
+    expect(text).toContain('.superpowers/chantiers/socle.json')
+    expect(text).toContain('Détermine toi-même la prochaine action')
+    expect(resumePrompt({ title: 'S', objective: '', progress: 1, merged: 1, total: 1, prs: [] }, [])).toContain('Tous les éléments sont fusionnés')
+  })
+})

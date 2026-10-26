@@ -53,6 +53,7 @@ function fakeRepo(on: On) {
   })
   on('process.run', async ($, e) => {
     if (e.argv[1] === 'rev-parse') return { value: run(0, `${ROOT}/.git\n`) }
+    if (e.argv[1] === 'branch') return { value: run(0, 'feat/x-pr7b\n') }
     if (e.argv[1] === 'worktree') return { value: run(0, `worktree ${ROOT}\nHEAD 1\n\nworktree ${TREE}\nHEAD 2\n`) }
     return { value: run(1, '') }
   })
@@ -180,5 +181,24 @@ describe('PR découpées et PR en pause', () => {
     expect(await ui.find({ type: 'Text', text: /▶ En cours : PR-8e2 Langue/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /▶ En cours : PR-9/ })).toBeUndefined()
     await ui.unmount()
+  })
+})
+
+describe('reprise', () => {
+  test('/reprendre sans argument prend le seul chantier et envoie la consigne comme un message de la personne', async ($, on) => {
+    fakeRepo(on)
+    const sent: { text: string; asUser?: boolean }[] = []
+    on('prompt.submit', async ($, e) => {
+      sent.push({ text: e.text, asUser: (e.origin as { asUser?: boolean } | undefined)?.asUser })
+      return { text: e.text } as never
+    })
+    on('clock.after', async () => ({ value: undefined }))
+    const out = await $.command.run({ command: 'reprendre', args: '', origin: 'user' } as never)
+    for (let i = 0; i < 20 && sent.length === 0; i++) await new Promise(r => setTimeout(r, 5))
+    expect(out.text).toBe('Reprise — Agents IA : 54 % — 1/3 PR mergées. En cours : PR-7b Tiroir — en cours, 2/3 tâches, prochaine B3.')
+    expect(sent).toHaveLength(1)
+    expect(sent[0]?.asUser).toBe(true)
+    expect(sent[0]?.text).toContain('Élément à reprendre : PR-7b — Tiroir (en cours ; 2/3 tâches ; prochaine tâche B3')
+    expect(sent[0]?.text).toContain('.superpowers/chantiers/x.json')
   })
 })
