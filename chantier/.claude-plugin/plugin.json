@@ -1,0 +1,1 @@
+{ "name": "chantier", "version": "0.4.2", "description": "Panneau /chantier : objectif, avancement exact et PR d'un chantier (plans, registres SDD, GitHub)", "types": "./types/index.d.ts" }

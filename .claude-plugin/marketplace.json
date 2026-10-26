@@ -1,0 +1,5 @@
+{
+  "name": "mods-locaux",
+  "owner": { "name": "orionmoon" },
+  "plugins": [{ "name": "chantier", "source": "./chantier", "description": "Panneau /chantier : objectif, avancement exact et PR du chantier de la session" }]
+}
