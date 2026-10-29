@@ -21,6 +21,7 @@ import {
   planTasks,
   resumePrompt,
   resumeTarget,
+  sessionTitle,
   prNumbers,
   resolveState,
   sentence,
@@ -217,6 +218,12 @@ describe('reprise', () => {
     expect(resumeTarget([merged, planned, live])?.id).toBe('lot3')
     expect(resumeTarget([merged, planned])?.id).toBe('lot4')
     expect(resumeTarget([merged])).toBeUndefined()
+  })
+
+  test('le titre de la session nomme le chantier et l’élément repris', async () => {
+    const live = { id: 'lot5b', title: 'Lot 5b : un seul écran de relecture', objective: '', status: 'in_progress' as const, progress: 0.6 }
+    expect(sessionTitle({ title: 'Socle d’analyses', prs: [live] })).toBe('Socle d’analyses — Lot 5b : un seul écran de relecture')
+    expect(sessionTitle({ title: 'Socle', prs: [] })).toBe('Socle')
   })
 
   test('la consigne donne l’état, l’élément, les sources et demande d’enchaîner', async () => {

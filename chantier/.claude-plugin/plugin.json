@@ -1,1 +1,1 @@
-{ "name": "chantier", "version": "0.5.0", "description": "Panneau /chantier : objectif, avancement exact et PR d'un chantier (plans, registres SDD, GitHub) ; /reprendre relance le travail", "types": "./types/index.d.ts" }
+{ "name": "chantier", "version": "0.6.0", "description": "Panneau /chantier : objectif, avancement exact et PR d'un chantier (plans, registres SDD, GitHub) ; /reprendre relance le travail et renomme la session", "types": "./types/index.d.ts" }

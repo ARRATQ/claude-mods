@@ -536,6 +536,12 @@ export function resumeTarget(prs: PrRow[]): PrRow | undefined {
   return prs.find(pr => pr.status === 'in_progress' || pr.status === 'open') ?? prs.find(pr => pr.status === 'planned')
 }
 
+// Titre donné à la session par /reprendre : le chantier, puis l'élément repris.
+export function sessionTitle(r: Pick<Report, 'title' | 'prs'>): string {
+  const pr = resumeTarget(r.prs)
+  return pr ? `${r.title} — ${pr.title}` : r.title
+}
+
 // Consigne de /reprendre, envoyée comme un message de la personne : l'état du
 // chantier, ce qu'il faut relire, puis reprendre le travail sans autre consigne.
 export function resumePrompt(
@@ -716,6 +722,11 @@ export const register: Register = on => {
     // Envoyée depuis la commande, la consigne attendrait le tour que la commande
     // tient : un minuteur la soumet juste après, comme un message de la personne.
     const text = resumePrompt(r, sources)
+    // Hors de l'application de bureau, l'outil n'existe pas : la reprise se fait
+    // quand même, sans renommage.
+    await $.tool
+      .call({ tool: 'mcp__ccd_session_mgmt__set_session_title', session_id: 'self', title: sessionTitle(r) })
+      .catch(() => undefined)
     $.clock.after(1, () => void $.prompt.submit({ text, asUser: true }).catch(() => $.ui.toast('La reprise n’a pas pu être lancée : /reprendre à nouveau.')))
     return { text: `Reprise — ${sentence(r)}` }
   })
